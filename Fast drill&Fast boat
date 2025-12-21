@@ -1,0 +1,293 @@
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/sigmaboi4167-code/Linoria-Gui-Execly.gay-Gui/refs/heads/main/Linorialib", true))()
+local ThemeManager = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/addons/SaveManager.lua'))()
+
+local Window = Library:CreateWindow({
+    Title = 'Fast Drill & Boat',
+    Center = true,
+    AutoShow = false,
+    TabPadding = 4,
+    MenuFadeTime = 0.1,
+    Size = UDim2.new(0, 320, 0, 260)
+})
+
+local Tabs = {
+    Main = Window:AddTab('Main'),
+    Settings = Window:AddTab('Settings')
+}
+
+-- ==================== FAST DRILL ====================
+local FastDrillBox = Tabs.Main:AddLeftGroupbox('Fast Drill')
+
+local OriginalDrillCooldowns = {}
+
+local function ApplyFastDrill()
+    for _, v in pairs(getgc(true)) do
+        if typeof(v) == "table" and rawget(v, "type") == "MiningDrill" and rawget(v, "AttackCooldown") ~= nil then
+            if not OriginalDrillCooldowns[v] then
+                OriginalDrillCooldowns[v] = v.AttackCooldown
+            end
+            v.AttackCooldown = 0
+        end
+    end
+end
+
+local function RestoreDrillCooldowns()
+    for drill, original in pairs(OriginalDrillCooldowns) do
+        if drill and typeof(drill) == "table" and rawget(drill, "AttackCooldown") ~= nil then
+            drill.AttackCooldown = original
+        end
+    end
+    OriginalDrillCooldowns = {}
+end
+
+FastDrillBox:AddToggle('FastDrillToggle', {
+    Text = 'Fast Drill',
+    Default = false,
+    Tooltip = 'Removes mining drill cooldown (instant mine)',
+    Callback = function(Value)
+        if Value then
+            ApplyFastDrill()
+            spawn(function()
+                while Toggles.FastDrillToggle.Value do
+                    ApplyFastDrill()
+                    task.wait(1)
+                end
+            end)
+            Library:Notify("Fast Drill enabled!", 3)
+        else
+            RestoreDrillCooldowns()
+            Library:Notify("Fast Drill disabled.", 3)
+        end
+    end
+})
+
+-- ==================== FAST BOAT (Tuned for Trident Survival v5) ====================
+local FastBoatBox = Tabs.Main:AddRightGroupbox('Fast Boat')
+
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local CUSTOM_SPEED = 240
+local UPSPEED = 40
+local ACCEL = 180
+local DECEL = 80
+local YAW_RATE = 3.0
+local MAX_FORCE = 45000
+
+local boat = nil
+local buildup = 0
+local currentYaw = 0
+local isBoostOn = false
+local connection = nil
+local oldNewIndex = nil
+
+local function findBoat()
+    boat = nil
+    for _, v in pairs(workspace:GetChildren()) do
+        if v:IsA("Model") and (v.Name:find("Boat") or v:FindFirstChild("Hull")) then
+            boat = v
+            boat.PrimaryPart = v:FindFirstChild("Hull") or v:FindFirstChildWhichIsA("BasePart")
+            if boat.PrimaryPart then
+                break
+            end
+        end
+    end
+end
+
+local function cleanupBoatBoost()
+    isBoostOn = false
+    buildup = 0
+    currentYaw = 0
+    if connection then
+        connection:Disconnect()
+        connection = nil
+    end
+    if boat and boat:FindFirstChild("Hull") then
+        local hull = boat.Hull
+        hull.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        if hull:FindFirstChild("LinearVelocity") then
+            hull.LinearVelocity.Enabled = false
+        end
+        if hull:FindFirstChild("AlignPosition") then
+            hull.AlignPosition.Enabled = true
+            hull.AlignPosition.MaxForce = math.huge
+        end
+    end
+    if oldNewIndex then
+        hookmetamethod(game, "__newindex", oldNewIndex)
+        oldNewIndex = nil
+    end
+end
+
+local function applyBoatBoost()
+    cleanupBoatBoost()
+
+    findBoat()
+    if not boat or not boat.PrimaryPart then return end
+
+    local hull = boat.PrimaryPart
+    _, currentYaw = hull.CFrame:ToOrientation()
+
+    local mt = getrawmetatable(game)
+    oldNewIndex = hookmetamethod(game, "__newindex", function(t, k, v)
+        if (k == "CFrame" or k == "AssemblyLinearVelocity") and checkcaller() then
+            return
+        end
+        return oldNewIndex(t, k, v)
+    end)
+
+    isBoostOn = true
+
+    connection = RunService.Heartbeat:Connect(function(delta)
+        if not boat or not boat.PrimaryPart then
+            connection:Disconnect()
+            findBoat()
+            return
+        end
+
+        local hull = boat.PrimaryPart
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            currentYaw = currentYaw + YAW_RATE * delta
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            currentYaw = currentYaw - YAW_RATE * delta
+        end
+
+        local forwardDir = CFrame.fromOrientation(0, currentYaw, 0).LookVector
+
+        local moveInput = 0
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveInput = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveInput = -1 end
+
+        local upInput = 0
+        if UserInputService:IsKeyDown(Enum.KeyCode.V) then upInput = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.B) then upInput = -1 end
+
+        if moveInput ~= 0 then
+            buildup = math.clamp(buildup + (ACCEL * delta) * moveInput, -CUSTOM_SPEED, CUSTOM_SPEED)
+        else
+            if buildup > 0 then
+                buildup = math.max(buildup - (DECEL * delta), 0)
+            elseif buildup < 0 then
+                buildup = math.min(buildup + (DECEL * delta), 0)
+            end
+        end
+
+        local horizontalVelocity = -forwardDir * buildup
+        local verticalVelocity = Vector3.new(0, upInput * UPSPEED, 0)
+        local velocity = horizontalVelocity + verticalVelocity
+
+        local waterLevel = workspace:GetAttribute("WaterLevel") or 0
+        local newPos = hull.Position + velocity * delta
+        newPos = Vector3.new(newPos.X, math.max(newPos.Y, waterLevel + 2), newPos.Z)
+
+        local newCFrame = CFrame.new(newPos) * CFrame.fromOrientation(0, currentYaw, 0)
+        boat:PivotTo(newCFrame)
+        hull.AssemblyLinearVelocity = velocity
+
+        if hull:FindFirstChild("LinearVelocity") then
+            hull.LinearVelocity.Enabled = true
+            hull.LinearVelocity.MaxForce = MAX_FORCE
+            hull.LinearVelocity.VectorVelocity = velocity
+        end
+
+        if hull:FindFirstChild("MotorSound") then
+            hull.MotorSound.Volume = 0
+        end
+        if hull:FindFirstChild("Steer") and hull.Steer:FindFirstChild("AngularVelocity") then
+            hull.Steer.AngularVelocity.AngularVelocity = Vector3.zero
+            hull.Steer.AngularVelocity.MaxTorque = Vector3.zero
+        end
+        if hull:FindFirstChild("AlignPosition") then
+            hull.AlignPosition.Enabled = false
+        end
+    end)
+end
+
+-- Fast Boat Toggle in UI
+FastBoatBox:AddToggle('FastBoatToggle', {
+    Text = 'Fast Boat',
+    Default = false,
+    Tooltip = 'W = forward (full speed), S = back, A/D = turn only, V/B = up/down',
+    Callback = function(Value)
+        if Value then
+            findBoat()
+            if boat and boat.PrimaryPart then
+                applyBoatBoost()
+                Library:Notify("Fast Boat enabled! Hold W for insane speed 🚤", 5)
+            else
+                Library:Notify("No boat found! Enter a boat first.", 5)
+                Toggles.FastBoatToggle:SetValue(false)
+            end
+        else
+            cleanupBoatBoost()
+            Library:Notify("Fast Boat disabled.", 3)
+        end
+    end
+})
+
+-- NEW: KeyPicker for Fast Boat
+FastBoatBox:AddLabel('Fast Boat Keybind'):AddKeyPicker('FastBoatKeybind', {
+    Default = 'LeftShift',  -- You can change this default key
+    Mode = 'Toggle',        -- Toggle mode (press once to enable, again to disable)
+    Text = 'Fast Boat Toggle Key',
+    Tooltip = 'Press this key to quickly toggle Fast Boat on/off'
+})
+
+-- Keybind listener
+Options.FastBoatKeybind:OnClick(function()
+    local current = Toggles.FastBoatToggle.Value
+    Toggles.FastBoatToggle:SetValue(not current)
+end)
+
+-- Auto-reconnect when entering a new boat
+spawn(function()
+    while task.wait(1.5) do
+        if Toggles.FastBoatToggle.Value and (not boat or not boat.Parent) then
+            findBoat()
+            if boat and boat.PrimaryPart then
+                applyBoatBoost()
+                Library:Notify("Boat detected - Fast Boat re-enabled!", 3)
+            end
+        end
+    end
+end)
+
+-- ==================== SETTINGS TAB ====================
+local SettingsBox = Tabs.Settings:AddLeftGroupbox('Menu Settings')
+
+SettingsBox:AddButton('Unload', function()
+    RestoreDrillCooldowns()
+    cleanupBoatBoost()
+    Library:Unload()
+end)
+
+SettingsBox:AddBlank(6)
+
+SettingsBox:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', {
+    Default = 'End',
+    NoUI = true,
+    Text = 'Menu keybind'
+})
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+if Options.MenuKeybind.Value == nil then
+    Options.MenuKeybind:SetValue('End')
+end
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'FastBoatKeybind' })  -- Save the new keybind too
+
+ThemeManager:SetFolder('TridentFastMenu')
+SaveManager:SetFolder('TridentFastMenu/configs')
+
+ThemeManager:ApplyToTab(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+SaveManager:LoadAutoloadConfig()
+
+Library:Notify("Press END to open/close menu. Fast Boat keybind added (default: Left Shift)! Enjoy Trident Survival v5 hacks!", 10)
