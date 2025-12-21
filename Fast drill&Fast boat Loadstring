@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/onex-arch/script-stuff/refs/heads/main/Fast%20drill%26Fast%20boat"))()
