@@ -62,6 +62,20 @@ FastDrillBox:AddToggle('FastDrillToggle', {
     end
 })
 
+-- NEW: KeyPicker for Fast Drill
+FastDrillBox:AddLabel('Fast Drill Keybind'):AddKeyPicker('FastDrillKeybind', {
+    Default = 'LeftControl',  -- You can change this default key
+    Mode = 'Toggle',
+    Text = 'Fast Drill Toggle Key',
+    Tooltip = 'Press this key to quickly toggle Fast Drill on/off'
+})
+
+-- Keybind listener for Fast Drill
+Options.FastDrillKeybind:OnClick(function()
+    local current = Toggles.FastDrillToggle.Value
+    Toggles.FastDrillToggle:SetValue(not current)
+end)
+
 -- ==================== FAST BOAT (Tuned for Trident Survival v5) ====================
 local FastBoatBox = Tabs.Main:AddRightGroupbox('Fast Boat')
 
@@ -228,10 +242,10 @@ FastBoatBox:AddToggle('FastBoatToggle', {
     end
 })
 
--- NEW: KeyPicker for Fast Boat
+-- KeyPicker for Fast Boat
 FastBoatBox:AddLabel('Fast Boat Keybind'):AddKeyPicker('FastBoatKeybind', {
-    Default = 'LeftShift',  -- You can change this default key
-    Mode = 'Toggle',        -- Toggle mode (press once to enable, again to disable)
+    Default = 'LeftShift',
+    Mode = 'Toggle',
     Text = 'Fast Boat Toggle Key',
     Tooltip = 'Press this key to quickly toggle Fast Boat on/off'
 })
@@ -281,7 +295,7 @@ end
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'FastBoatKeybind' })  -- Save the new keybind too
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind', 'FastBoatKeybind', 'FastDrillKeybind' })  -- Added FastDrillKeybind here for saving
 
 ThemeManager:SetFolder('TridentFastMenu')
 SaveManager:SetFolder('TridentFastMenu/configs')
@@ -290,4 +304,4 @@ ThemeManager:ApplyToTab(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
-Library:Notify("Press END to open/close menu. Fast Boat keybind added (default: Left Shift)! Enjoy Trident Survival v5 hacks!", 10)
+Library:Notify("Press END to open/close menu. Fast Drill keybind added (default: Left Control)! Enjoy Trident Survival v5 hacks!", 10)
