@@ -11,6 +11,7 @@
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
@@ -20,10 +21,25 @@ local BaseFOV = 70
 Camera.FieldOfView = FOV
 
 local scale = BaseFOV / Camera.FieldOfView
-local processedObjects = {}
+local processedObjects = setmetatable({}, { __mode = "k" })
 
 local menuToys = ReplicatedStorage:WaitForChild("MenuToys", 5)
 local spawnRemote = menuToys and menuToys:WaitForChild("SpawnToyRemoteFunction", 5)
+
+local AIM_KEY = Enum.KeyCode.PageUp
+local MAX_STUD_DISTANCE = 360
+local FOV_RADIUS = 56
+
+local TARGET_KEYWORDS = {"decoy", "little", "robloxian", "robloxians"}
+
+local isAiming = false
+local validTargetModels = {}
+local lockedModel = nil
+
+local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+Camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+    screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end)
 
 local function applyScale(obj)
     if processedObjects[obj] then return end
@@ -63,7 +79,130 @@ Players.PlayerAdded:Connect(function(p)
     p.CharacterAdded:Connect(monitorCharacter)
 end)
 
+local function isTargetModel(model)
+    if not model or model == player.Character then return false end
+    
+    if Players:GetPlayerFromCharacter(model) then
+        return true
+    end
+
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    local cleanName = string.lower(string.gsub(model.Name, "[%s_]", ""))
+    local cleanDisplayName = hum and string.lower(string.gsub(hum.DisplayName, "[%s_]", "")) or ""
+
+    for i = 1, #TARGET_KEYWORDS do
+        local kw = TARGET_KEYWORDS[i]
+        if string.find(cleanName, kw, 1, true) or string.find(cleanDisplayName, kw, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function getMainPart(model)
+    return model:FindFirstChild("HumanoidRootPart") 
+        or model:FindFirstChild("Head") 
+        or model.PrimaryPart 
+        or model:FindFirstChildOfClass("BasePart")
+end
+
+task.spawn(function()
+    while true do
+        if isAiming or UIS:IsKeyDown(AIM_KEY) then
+            local newModels = {}
+            for _, desc in ipairs(workspace:GetDescendants()) do
+                if desc:IsA("Model") and isTargetModel(desc) then
+                    local hum = desc:FindFirstChildOfClass("Humanoid")
+                    if not hum or hum.Health > 0 then
+                        table.insert(newModels, desc)
+                    end
+                end
+            end
+            validTargetModels = newModels
+            task.wait(0.2)
+        else
+            task.wait(0.5)
+        end
+    end
+end)
+
+local function getClosestTargetModel()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local originPos = hrp and hrp.Position or Camera.CFrame.Position
+
+    local closestModel = nil
+    local shortestDist = FOV_RADIUS
+
+    for i = 1, #validTargetModels do
+        local model = validTargetModels[i]
+        if model and model.Parent then
+            local part = getMainPart(model)
+            if part then
+                local studDist = (part.Position - originPos).Magnitude
+                if studDist <= MAX_STUD_DISTANCE then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen and screenPos.Z > 0 then
+                        local mouseDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        if mouseDist <= shortestDist then
+                            shortestDist = mouseDist
+                            closestModel = model
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestModel
+end
+
+local function getClosestBodyPartOfModel(model, originPos)
+    local closestPart = nil
+    local shortestDist = math.huge
+
+    local children = model:GetChildren()
+    for i = 1, #children do
+        local child = children[i]
+        if child:IsA("BasePart") then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(child.Position)
+            if onScreen and screenPos.Z > 0 then
+                local mouseDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                if mouseDist < shortestDist then
+                    shortestDist = mouseDist
+                    closestPart = child
+                end
+            end
+        end
+    end
+
+    return closestPart or getMainPart(model)
+end
+
+local function isStillValidModel(model)
+    if not model or not model.Parent then return false end
+    
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return false end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local originPos = hrp and hrp.Position or Camera.CFrame.Position
+    
+    local rootPart = getMainPart(model)
+    if rootPart then
+        local studDist = (rootPart.Position - originPos).Magnitude
+        if studDist > MAX_STUD_DISTANCE then return false end
+    end
+
+    return true
+end
+
 UIS.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == AIM_KEY then
+        isAiming = true
+    end
+
     if processed or input.KeyCode ~= Enum.KeyCode.Home or not spawnRemote then return end
 
     local char = player.Character
@@ -76,4 +215,32 @@ UIS.InputBegan:Connect(function(input, processed)
     local _, ry, _ = targetCFrame:ToOrientation()
     
     spawnRemote:InvokeServer("PalletLightBrown", spawnCFrame, Vector3.new(0, math.deg(ry), 0))
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.KeyCode == AIM_KEY then
+        isAiming = false
+        lockedModel = nil
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if isAiming or UIS:IsKeyDown(AIM_KEY) then
+        if not isStillValidModel(lockedModel) then
+            lockedModel = getClosestTargetModel()
+        end
+
+        if lockedModel then
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local originPos = hrp and hrp.Position or Camera.CFrame.Position
+
+            local targetPart = getClosestBodyPartOfModel(lockedModel, originPos)
+            if targetPart then
+                Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetPart.Position)
+            end
+        end
+    else
+        lockedModel = nil
+    end
 end)
