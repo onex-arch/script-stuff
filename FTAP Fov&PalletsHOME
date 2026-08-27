@@ -1,0 +1,79 @@
+--[[
+       /\                                  /\
+  +---/  \--------------------------------/  \---+
+  |  / /\ \  . . : : # # # # # : : . .   / /\ \  |
+  | < <  > > ===--- MADE BY ONEX ---=== < <  > > |
+  |  \ \/ /  . . : : # # # # # : : . .   \ \/ /  |
+  +---\  /--------------------------------\  /---+
+       \/                                  \/
+--]]
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local FOV = 100
+local BaseFOV = 70
+Camera.FieldOfView = FOV
+
+local scale = BaseFOV / Camera.FieldOfView
+local processedObjects = {}
+
+local menuToys = ReplicatedStorage:WaitForChild("MenuToys", 5)
+local spawnRemote = menuToys and menuToys:WaitForChild("SpawnToyRemoteFunction", 5)
+
+local function applyScale(obj)
+    if processedObjects[obj] then return end
+
+    if obj:IsA("BillboardGui") then
+        processedObjects[obj] = true
+        obj.Size = UDim2.new(
+            obj.Size.X.Scale * scale,
+            obj.Size.X.Offset * scale,
+            obj.Size.Y.Scale * scale,
+            obj.Size.Y.Offset * scale
+        )
+    elseif obj:IsA("TextLabel") or obj:IsA("TextButton") then
+        processedObjects[obj] = true
+        obj.TextSize = math.max(8, obj.TextSize * scale)
+    end
+end
+
+local function monitorCharacter(char)
+    for _, obj in ipairs(char:GetDescendants()) do
+        applyScale(obj)
+    end
+    
+    char.DescendantAdded:Connect(function(obj)
+        if obj:IsA("BillboardGui") or obj:IsA("TextLabel") or obj:IsA("TextButton") then
+            applyScale(obj)
+        end
+    end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p.Character then monitorCharacter(p.Character) end
+    p.CharacterAdded:Connect(monitorCharacter)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(monitorCharacter)
+end)
+
+UIS.InputBegan:Connect(function(input, processed)
+    if processed or input.KeyCode ~= Enum.KeyCode.Home or not spawnRemote then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    
+    local camCFrame = Camera.CFrame
+    local spawnCFrame = camCFrame + (camCFrame.LookVector * 6)
+    
+    local targetCFrame = hrp and hrp.CFrame or camCFrame
+    local _, ry, _ = targetCFrame:ToOrientation()
+    
+    spawnRemote:InvokeServer("PalletLightBrown", spawnCFrame, Vector3.new(0, math.deg(ry), 0))
+end)
